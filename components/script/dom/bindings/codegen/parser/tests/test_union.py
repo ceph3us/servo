@@ -80,9 +80,9 @@ def WebIDLTest(parser, harness):
         interface PrepareForTest {
         """
     for (i, type) in enumerate(types):
-        interface += string.Template("""
-          readonly attribute ${type} attr${i};
-        """).substitute(i=i, type=type)
+        interface += """
+          readonly attribute {type} attr{i};
+        """.format(i=i, type=type)
     interface += """
         };
         """
@@ -133,15 +133,15 @@ def WebIDLTest(parser, harness):
         interface TestUnion {
         """
     for (i, type) in enumerate(validUnionTypes):
-        interface += string.Template("""
-          void method${i}(${type} arg);
-          ${type} returnMethod${i}();
-          attribute ${type} attr${i};
-          void arrayMethod${i}(${type}[] arg);
-          ${type}[] arrayReturnMethod${i}();
-          attribute ${type}[] arrayAttr${i};
-          void optionalMethod${i}(${type}? arg);
-        """).substitute(i=i, type=type)
+        interface += """
+          void method{i}({type} arg);
+          {type} returnMethod{i}();
+          attribute {type} attr{i};
+          void arrayMethod{i}({type}[] arg);
+          {type}[] arrayReturnMethod{i}();
+          attribute {type}[] arrayAttr{i};
+          void optionalMethod{i}({type}? arg);
+        """.format(i=i, type=type)
     interface += """
         };
         """
@@ -151,11 +151,11 @@ def WebIDLTest(parser, harness):
     parser = parser.reset()
 
     for invalid in invalidUnionTypes:
-        interface = testPre + string.Template("""
+        interface = testPre + """
             interface TestUnion {
-              void method(${type} arg);
+              void method({type} arg);
             };
-        """).substitute(type=invalid)
+        """.format(type=invalid)
 
         threw = False
         try:
