@@ -23,6 +23,7 @@ from WebIDL import (
 
 from Configuration import (
     MemberIsUnforgeable,
+    getModuleFromObject,
     getTypesFromCallback,
     getTypesFromDescriptor,
     getTypesFromDictionary,
@@ -920,7 +921,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         assert not type.treatNonObjectAsNull() or not type.treatNonCallableAsNull()
 
         callback = type.unroll().callback
-        declType = CGGeneric('%s::%s' % (callback.module(), callback.identifier.name))
+        declType = CGGeneric('%s::%s' % (getModuleFromObject(callback), callback.identifier.name))
         finalDeclType = CGTemplatedType("Rc", declType)
 
         conversion = CGCallbackTempRoot(declType.define())
@@ -1281,7 +1282,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider):
         return result
     if returnType.isCallback():
         callback = returnType.unroll().callback
-        result = CGGeneric('Rc<%s::%s>' % (callback.module(), callback.identifier.name))
+        result = CGGeneric('Rc<%s::%s>' % (getModuleFromObject(callback), callback.identifier.name))
         if returnType.nullable():
             result = CGWrapper(result, pre="Option<", post=">")
         return result
@@ -4722,50 +4723,26 @@ class CGClassConstructHook(CGAbstractExternMethod):
     """
     JS-visible constructor for our objects
     """
-    def __init__(self, descriptor):
+    def __init__(self, descriptor, constructor=None):
         args = [Argument('*mut JSContext', 'cx'), Argument('u32', 'argc'), Argument('*mut JSVal', 'vp')]
-        CGAbstractExternMethod.__init__(self, descriptor, CONSTRUCT_HOOK_NAME,
-                                        'bool', args)
-        self._ctor = self.descriptor.interface.ctor()
-
-    def define(self):
-        if not self._ctor:
-            return ""
-        return CGAbstractExternMethod.define(self)
+        name = CONSTRUCT_HOOK_NAME
+        if constructor:
+            name += "_" + constructor.identifier.name
+        else:
+            constructor = descriptor.interface.ctor()
+            assert constructor
+        CGAbstractExternMethod.__init__(self, descriptor, name, 'bool', args)
+        self.constructor = constructor
 
     def definition_body(self):
         preamble = CGGeneric("""\
 let global = global_root_from_object(JS_CALLEE(cx, vp).to_object());
 let args = CallArgs::from_vp(vp, argc);
 """)
-        name = self._ctor.identifier.name
+        name = self.constructor.identifier.name
         nativeName = MakeNativeName(self.descriptor.binaryNameFor(name))
         callGenerator = CGMethodCall(["global.r()"], nativeName, True,
-                                     self.descriptor, self._ctor)
-        return CGList([preamble, callGenerator])
-
-
-class CGClassNameConstructHook(CGAbstractExternMethod):
-    """
-    JS-visible named constructor for our objects
-    """
-    def __init__(self, descriptor, ctor):
-        args = [Argument('*mut JSContext', 'cx'), Argument('u32', 'argc'), Argument('*mut JSVal', 'vp')]
-        self._ctor = ctor
-        CGAbstractExternMethod.__init__(self, descriptor,
-                                        CONSTRUCT_HOOK_NAME + "_" +
-                                        self._ctor.identifier.name,
-                                        'bool', args)
-
-    def definition_body(self):
-        preamble = CGGeneric("""\
-let global = global_root_from_object(JS_CALLEE(cx, vp).to_object());
-let args = CallArgs::from_vp(vp, argc);
-""")
-        name = self._ctor.identifier.name
-        nativeName = MakeNativeName(self.descriptor.binaryNameFor(name))
-        callGenerator = CGMethodCall(["global.r()"], nativeName, True,
-                                     self.descriptor, self._ctor)
+                                     self.descriptor, self.constructor)
         return CGList([preamble, callGenerator])
 
 
@@ -4932,9 +4909,10 @@ class CGDescriptor(CGThing):
             cgThings.append(CGClassTraceHook(descriptor))
 
         if descriptor.interface.hasInterfaceObject():
-            cgThings.append(CGClassConstructHook(descriptor))
+            if descriptor.interface.ctor():
+                cgThings.append(CGClassConstructHook(descriptor))
             for ctor in descriptor.interface.namedConstructors:
-                cgThings.append(CGClassNameConstructHook(descriptor, ctor))
+                cgThings.append(CGClassConstructHook(descriptor, ctor))
             cgThings.append(CGInterfaceObjectJSClass(descriptor))
 
         if not descriptor.interface.isCallback():
@@ -5157,7 +5135,7 @@ class CGDictionary(CGThing):
 
     @staticmethod
     def makeModuleName(dictionary):
-        return dictionary.module()
+        return getModuleFromObject(dictionary)
 
     def getMemberType(self, memberInfo):
         member, info = memberInfo
@@ -5280,17 +5258,23 @@ class CGBindingRoot(CGThing):
         descriptors.extend(config.getDescriptors(webIDLFile=webIDLFile,
                                                  hasInterfaceObject=False,
                                                  isCallback=False))
-        dictionaries = config.getDictionaries(webIDLFile=webIDLFile)
 
-        cgthings = []
+        dictionaries = config.getDictionaries(webIDLFile=webIDLFile)
 
         mainCallbacks = config.getCallbacks(webIDLFile=webIDLFile)
         callbackDescriptors = config.getDescriptors(webIDLFile=webIDLFile,
                                                     isCallback=True)
 
-        # Do codegen for all the enums
-        cgthings = [CGEnum(e) for e in config.getEnums(webIDLFile)]
+        enums = config.getEnums(webIDLFile)
 
+        if not (descriptors or dictionaries or mainCallbacks or callbackDescriptors or enums):
+            self.root = None
+            return
+
+        # Do codegen for all the enums.
+        cgthings = [CGEnum(e) for e in enums]
+
+        # Do codegen for all the dictionaries.
         cgthings.extend([CGDictionary(d, config.getDescriptorProvider())
                          for d in dictionaries])
 
@@ -5309,10 +5293,6 @@ class CGBindingRoot(CGThing):
 
         # And make sure we have the right number of newlines at the end
         curr = CGWrapper(CGList(cgthings, "\n\n"), post="\n\n")
-
-        # Wrap all of that in our namespaces.
-        # curr = CGNamespace.build(['dom'],
-        #                          CGWrapper(curr, pre="\n"))
 
         # Add imports
         curr = CGImports(curr, descriptors + callbackDescriptors, mainCallbacks, [
@@ -5412,6 +5392,8 @@ class CGBindingRoot(CGThing):
         self.root = curr
 
     def define(self):
+        if not self.root:
+            return None
         return stripTrailingWhitespace(self.root.define())
 
 
@@ -6056,8 +6038,8 @@ class GlobalGenRoots():
     def Bindings(config):
 
         descriptors = (set(d.name + "Binding" for d in config.getDescriptors(register=True)) |
-                       set(d.module() for d in config.callbacks) |
-                       set(d.module() for d in config.getDictionaries()))
+                       set(getModuleFromObject(d) for d in config.callbacks) |
+                       set(getModuleFromObject(d) for d in config.getDictionaries()))
         curr = CGList([CGGeneric("pub mod %s;\n" % name) for name in sorted(descriptors)])
         curr = CGWrapper(curr, pre=AUTOGENERATED_WARNING_COMMENT)
         return curr
