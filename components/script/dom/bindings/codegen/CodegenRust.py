@@ -297,11 +297,11 @@ class CGNativePropertyHooks(CGThing):
             "parentHooks": parentHooks
         }
 
-        return string.Template(
-            "pub static sNativePropertyHooks: NativePropertyHooks = NativePropertyHooks {\n"
+        return (
+            "pub static sNativePropertyHooks: NativePropertyHooks = NativePropertyHooks {{\n"
             "    native_properties: &sNativeProperties,\n"
-            "    proto_hooks: ${parentHooks},\n"
-            "};\n").substitute(substitutions)
+            "    proto_hooks: {parentHooks},\n"
+            "}};\n").format(**substitutions)
 
 
 class CGMethodCall(CGThing):
@@ -779,10 +779,9 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                 "interface": descriptor.interface.identifier.name,
                 "exceptionCode": exceptionCode,
             }
-            unwrapFailureCode = string.Template(
-                'throw_type_error(cx, "${sourceDescription} does not '
-                'implement interface ${interface}.");\n'
-                '${exceptionCode}').substitute(substitutions)
+            unwrapFailureCode = ('throw_type_error(cx, "{sourceDescription} does not '
+                'implement interface {interface}.");\n'
+                '{exceptionCode}').format(**substitutions)
         else:
             unwrapFailureCode = failureCode
 
@@ -1146,7 +1145,7 @@ class CGArgumentConverter(CGThing):
         }
 
         replacementVariables = {
-            "val": string.Template("${args}.get(${index})").substitute(replacer),
+            "val": "{args}.get({index})".format(**replacer),
         }
 
         info = getJSToNativeConversionInfo(
@@ -1185,7 +1184,7 @@ class CGArgumentConverter(CGThing):
         else:
             assert argument.optional
             variadicConversion = {
-                "val": string.Template("${args}.get(variadicArg)").substitute(replacer),
+                "val": "{args}.get(variadicArg)".format(**replacer),
             }
             innerConverter = [instantiateJSToNativeConversionTemplate(
                 template, variadicConversion, declType, "slot")]
@@ -2405,10 +2404,8 @@ class CGNativeProperties(CGThing):
             else:
                 value = "None"
 
-            return CGGeneric(string.Template('${name}: ${value},').substitute({
-                'name': array,
-                'value': value,
-            }))
+            return CGGeneric('{name}: {value},'.format(name=array,
+                             value=value))
 
         nativeProps = CGList([getField(array) for array in self.properties.arrayNames()], '\n')
         return CGWrapper(CGIndenter(nativeProps),
@@ -3892,21 +3889,21 @@ class ClassMethod(ClassItem):
         else:
             body = ';'
 
-        return string.Template(
-            "${decorators}%s"
-            "${visibility}fn ${name}${templateClause}(${args})${returnType}${const}${override}${body}%s" %
+        return (
+            "{decorators}%s"
+            "{visibility}fn {name}{templateClause}({args}){returnType}{const}{override}{body}%s" %
             (self.breakAfterReturnDecl, self.breakAfterSelf)
-        ).substitute({
-            'templateClause': templateClause,
-            'decorators': self.getDecorators(True),
-            'returnType': (" -> %s" % self.returnType) if self.returnType else "",
-            'name': self.name,
-            'const': ' const' if self.const else '',
-            'override': ' MOZ_OVERRIDE' if self.override else '',
-            'args': args,
-            'body': body,
-            'visibility': self.visibility + ' ' if self.visibility != 'priv' else ''
-        })
+        ).format(
+            templateClause=templateClause,
+            decorators=self.getDecorators(True),
+            returnType=(" -> %s" % self.returnType) if self.returnType else "",
+            name=self.name,
+            const=' const' if self.const else '',
+            override=' MOZ_OVERRIDE' if self.override else '',
+            args=args,
+            body=body,
+            visibility=self.visibility + ' ' if self.visibility != 'priv' else ''
+        )
 
     def define(self, cgClass):
         pass
@@ -3988,12 +3985,12 @@ class ClassConstructor(ClassItem):
             body += '\n'
         body = ' {\n' + body + '}'
 
-        return string.Template("""\
-pub fn ${decorators}new(${args}) -> Rc<${className}>${body}
-""").substitute({'decorators': self.getDecorators(True),
-                 'className': cgClass.getNameString(),
-                 'args': args,
-                 'body': body})
+        return """\
+pub fn {decorators}new({args}) -> Rc<{className}>{body}
+""".format(decorators=self.getDecorators(True),
+                 className=cgClass.getNameString(),
+                 args=args,
+                 body=body)
 
     def define(self, cgClass):
         if self.bodyInHeader:
@@ -4006,15 +4003,15 @@ pub fn ${decorators}new(${args}) -> Rc<${className}>${body}
         if len(body) > 0:
             body += '\n'
 
-        return string.Template("""\
-${decorators}
-${className}::${className}(${args})${initializationList}
-{${body}}
-""").substitute({'decorators': self.getDecorators(False),
-                 'className': cgClass.getNameString(),
-                 'args': args,
-                 'initializationList': self.getInitializationList(cgClass),
-                 'body': body})
+        return """\
+{decorators}
+{className}::{className}({args}){initializationList}
+{{{body}}}
+""".format(decorators=self.getDecorators(False),
+                 className=cgClass.getNameString(),
+                 args=args,
+                 initializationList=self.getInitializationList(cgClass),
+                 body=body)
 
 
 class ClassMember(ClassItem):
@@ -5058,12 +5055,12 @@ class CGDictionary(CGThing):
                        (self.makeMemberName(m[0].identifier.name), self.getMemberType(m))
                        for m in self.memberInfo]
 
-        return (string.Template(
-                "pub struct ${selfName} {\n" +
-                "${inheritance}" +
+        return (
+                "pub struct {selfName} {{\n" +
+                "{inheritance}" +
                 "\n".join(memberDecls) + "\n" +
-                "}").substitute({"selfName": self.makeClassName(d),
-                                 "inheritance": inheritance}))
+                "}}").format(selfName=self.makeClassName(d),
+                                 inheritance=inheritance)
 
     def impl(self):
         d = self.dictionary
@@ -5092,39 +5089,39 @@ class CGDictionary(CGThing):
         memberInits = CGList([memberInit(m) for m in self.memberInfo])
         memberInserts = CGList([memberInsert(m) for m in self.memberInfo])
 
-        return string.Template(
-            "impl ${selfName} {\n"
-            "    pub unsafe fn empty(cx: *mut JSContext) -> ${selfName} {\n"
-            "        ${selfName}::new(cx, HandleValue::null()).unwrap()\n"
-            "    }\n"
-            "    pub unsafe fn new(cx: *mut JSContext, val: HandleValue) -> Result<${selfName}, ()> {\n"
-            "        let object = if val.get().is_null_or_undefined() {\n"
+        return (
+            "impl {selfName} {{\n"
+            "    pub unsafe fn empty(cx: *mut JSContext) -> {selfName} {{\n"
+            "        {selfName}::new(cx, HandleValue::null()).unwrap()\n"
+            "    }}\n"
+            "    pub unsafe fn new(cx: *mut JSContext, val: HandleValue) -> Result<{selfName}, ()> {{\n"
+            "        let object = if val.get().is_null_or_undefined() {{\n"
             "            RootedObject::new(cx, ptr::null_mut())\n"
-            "        } else if val.get().is_object() {\n"
+            "        }} else if val.get().is_object() {{\n"
             "            RootedObject::new(cx, val.get().to_object())\n"
-            "        } else {\n"
+            "        }} else {{\n"
             "            throw_type_error(cx, \"Value not an object.\");\n"
             "            return Err(());\n"
-            "        };\n"
-            "        Ok(${selfName} {\n"
-            "${initParent}"
-            "${initMembers}"
-            "        })\n"
-            "    }\n"
-            "}\n"
+            "        }};\n"
+            "        Ok({selfName} {{\n"
+            "{initParent}"
+            "{initMembers}"
+            "        }})\n"
+            "    }}\n"
+            "}}\n"
             "\n"
-            "impl ToJSValConvertible for ${selfName} {\n"
-            "    unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {\n"
+            "impl ToJSValConvertible for {selfName} {{\n"
+            "    unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {{\n"
             "        let obj = RootedObject::new(cx, JS_NewObject(cx, ptr::null()));\n"
-            "${insertMembers}"
+            "{insertMembers}"
             "        rval.set(ObjectOrNullValue(obj.ptr))\n"
-            "    }\n"
-            "}\n").substitute({
-                "selfName": self.makeClassName(d),
-                "initParent": CGIndenter(CGGeneric(initParent), indentLevel=12).define(),
-                "initMembers": CGIndenter(memberInits, indentLevel=12).define(),
-                "insertMembers": CGIndenter(memberInserts, indentLevel=8).define(),
-            })
+            "    }}\n"
+            "}}\n").format(
+                selfName=self.makeClassName(d),
+                initParent=CGIndenter(CGGeneric(initParent), indentLevel=12).define(),
+                initMembers=CGIndenter(memberInits, indentLevel=12).define(),
+                insertMembers=CGIndenter(memberInserts, indentLevel=8).define(),
+            )
 
     @staticmethod
     def makeDictionaryName(dictionary):
@@ -5534,28 +5531,28 @@ class CGCallback(CGClass):
         argsWithoutThis.insert(0, Argument(None, "&self"))
 
         setupCall = ("let s = CallSetup::new(self, aExceptionHandling);\n"
-                     "if s.get_context().is_null() {\n"
+                     "if s.get_context().is_null() {{\n"
                      "    return Err(JSFailed);\n"
-                     "}\n")
+                     "}}\n")
 
-        bodyWithThis = string.Template(
+        bodyWithThis = (
             setupCall +
             "let mut thisObjJS = RootedObject::new(s.get_context(), ptr::null_mut());\n"
             "wrap_call_this_object(s.get_context(), thisObj, thisObjJS.handle_mut());\n"
-            "if thisObjJS.ptr.is_null() {\n"
+            "if thisObjJS.ptr.is_null() {{\n"
             "    return Err(JSFailed);\n"
-            "}\n"
-            "return ${methodName}(${callArgs});").substitute({
-                "callArgs": ", ".join(argnamesWithThis),
-                "methodName": 'self.' + method.name,
-            })
-        bodyWithoutThis = string.Template(
+            "}}\n"
+            "return {methodName}({callArgs});").format(
+                callArgs=", ".join(argnamesWithThis),
+                methodName='self.' + method.name,
+            )
+        bodyWithoutThis = (
             setupCall +
             "let thisObjJS = RootedObject::new(s.get_context(), ptr::null_mut());"
-            "return ${methodName}(${callArgs});").substitute({
-                "callArgs": ", ".join(argnamesWithoutThis),
-                "methodName": 'self.' + method.name,
-            })
+            "return {methodName}({callArgs});").format(
+                callArgs=", ".join(argnamesWithoutThis),
+                methodName='self.' + method.name,
+            )
         return [ClassMethod(method.name + '_', method.returnType, args,
                             bodyInHeader=True,
                             templateArgs=["T: Reflectable"],
@@ -5594,23 +5591,23 @@ class CGCallbackFunction(CGCallback):
 
 class CGCallbackFunctionImpl(CGGeneric):
     def __init__(self, callback):
-        impl = string.Template("""\
-impl CallbackContainer for ${type} {
-    fn new(callback: *mut JSObject) -> Rc<${type}> {
-        ${type}::new(callback)
-    }
+        impl = """\
+impl CallbackContainer for {type} {{
+    fn new(callback: *mut JSObject) -> Rc<{type}> {{
+        {type}::new(callback)
+    }}
 
-    fn callback(&self) -> *mut JSObject {
+    fn callback(&self) -> *mut JSObject {{
         self.parent.callback()
-    }
-}
+    }}
+}}
 
-impl ToJSValConvertible for ${type} {
-    unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
+impl ToJSValConvertible for {type} {{
+    unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {{
         self.callback().to_jsval(cx, rval);
-    }
-}\
-""").substitute({"type": callback.identifier.name})
+    }}
+}}\
+""".format(type=callback.identifier.name)
         CGGeneric.__init__(self, impl)
 
 
@@ -5694,22 +5691,22 @@ class CallbackMember(CGNativeMember):
         }
         if self.argCount > 0:
             replacements["argCount"] = self.argCountStr
-            replacements["argvDecl"] = string.Template(
-                "let mut argv = vec![UndefinedValue(); ${argCount}];\n"
-            ).substitute(replacements)
+            replacements["argvDecl"] = (
+                "let mut argv = vec![UndefinedValue(); {argCount}];\n"
+                ).format(**replacements)
         else:
             # Avoid weird 0-sized arrays
             replacements["argvDecl"] = ""
 
         # Newlines and semicolons are in the values
-        pre = string.Template(
-            "${setupCall}"
-            "${declRval}"
-            "${argvDecl}").substitute(replacements)
-        body = string.Template(
-            "${convertArgs}"
-            "${doCall}"
-            "${returnResult}").substitute(replacements)
+        pre = (
+            "{setupCall}"
+            "{declRval}"
+            "{argvDecl}").format(**replacements)
+        body = (
+            "{convertArgs}"
+            "{doCall}"
+            "{returnResult}").format(**replacements)
         return CGWrapper(CGIndenter(CGList([
             CGGeneric(pre),
             CGGeneric(body),
@@ -5773,21 +5770,21 @@ class CallbackMember(CGNativeMember):
             successCode="argv[%s] = argv_root.ptr;" % jsvalIndex,
             pre="let mut argv_root = RootedValue::new(cx, UndefinedValue());")
         if arg.variadic:
-            conversion = string.Template(
-                "for idx in 0..${arg}.len() {\n" +
+            conversion =(
+                "for idx in 0..{arg}.len() {{\n" +
                 CGIndenter(CGGeneric(conversion)).define() + "\n"
-                "}"
-            ).substitute({"arg": arg.identifier.name})
+                "}}"
+            ).format(arg=arg.identifier.name)
         elif arg.optional and not arg.defaultValue:
             conversion = (
                 CGIfWrapper("%s.is_some()" % arg.identifier.name,
                             CGGeneric(conversion)).define() +
-                " else if argc == %d {\n"
+                " else if argc == %d {{\n"
                 "    // This is our current trailing argument; reduce argc\n"
                 "    argc -= 1;\n"
-                "} else {\n"
+                "}} else {{\n"
                 "    argv[%d] = UndefinedValue();\n"
-                "}" % (i + 1, i))
+                "}}" % (i + 1, i))
         return conversion
 
     def getArgs(self, returnType, argList):
@@ -5854,18 +5851,18 @@ class CallbackMethod(CallbackMember):
         else:
             replacements["argv"] = "ptr::null_mut()"
             replacements["argc"] = "0"
-        return string.Template(
-            "${getCallable}"
-            "let rootedThis = RootedObject::new(cx, ${thisObj});\n"
+        return (
+            "{getCallable}"
+            "let rootedThis = RootedObject::new(cx, {thisObj});\n"
             "let ok = JS_CallFunctionValue(\n"
             "    cx, rootedThis.handle(), callable.handle(),\n"
-            "    &HandleValueArray {\n"
-            "        length_: ${argc} as ::libc::size_t,\n"
-            "        elements_: ${argv}\n"
-            "    }, rval.handle_mut());\n"
-            "if !ok {\n"
+            "    &HandleValueArray {{\n"
+            "        length_: {argc} as ::libc::size_t,\n"
+            "        elements_: {argv}\n"
+            "    }}, rval.handle_mut());\n"
+            "if !ok {{\n"
             "    return Err(JSFailed);\n"
-            "}\n").substitute(replacements)
+            "}}\n").format(**replacements)
 
 
 class CallCallback(CallbackMethod):
@@ -5901,9 +5898,9 @@ class CallbackOperationBase(CallbackMethod):
         replacements = {
             "methodName": self.methodName
         }
-        getCallableFromProp = string.Template(
-            'RootedValue::new(cx, try!(self.parent.get_callable_property(cx, "${methodName}")))'
-        ).substitute(replacements)
+        getCallableFromProp = (
+            'RootedValue::new(cx, try!(self.parent.get_callable_property(cx, "{methodName}")))'
+        ).format(**replacements)
         if not self.singleOperation:
             return 'JS::Rooted<JS::Value> callable(cx);\n' + getCallableFromProp
         return (
@@ -5945,10 +5942,10 @@ class CallbackGetter(CallbackMember):
         replacements = {
             "attrName": self.attrName
         }
-        return string.Template(
-            'if (!JS_GetProperty(cx, mCallback, "${attrName}", &rval)) {\n'
+        return (
+            'if (!JS_GetProperty(cx, mCallback, "{attrName}", &rval)) {\n'
             '    return Err(JSFailed);\n'
-            '}\n').substitute(replacements)
+            '}\n').format(**replacements)
 
 
 class CallbackSetter(CallbackMember):
@@ -5971,11 +5968,11 @@ class CallbackSetter(CallbackMember):
             "attrName": self.attrName,
             "argv": "argv.handleAt(0)",
         }
-        return string.Template(
+        return (
             'MOZ_ASSERT(argv.length() == 1);\n'
-            'if (!JS_SetProperty(cx, mCallback, "${attrName}", ${argv})) {\n'
+            'if (!JS_SetProperty(cx, mCallback, "{attrName}", {argv})) {\n'
             '    return Err(JSFailed);\n'
-            '}\n').substitute(replacements)
+            '}\n').format(**replacements)
 
     def getArgcDecl(self):
         return None
